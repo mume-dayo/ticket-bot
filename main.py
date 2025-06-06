@@ -14,35 +14,22 @@ intents.message_content = True
 intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Modalフォーム ---
 class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
-    def __init__(self, normal_category: str, priority_category: str):
+    def __init__(self, normal_category: str, priority_category: str, is_priority: bool = False):
         super().__init__()
         self.normal_category = normal_category
         self.priority_category = priority_category
+        self.is_priority = is_priority
 
     title_input = discord.ui.TextInput(label="Label", placeholder="チケットのタイトルを入力してください", required=True)
     desc_input = discord.ui.TextInput(label="Description", placeholder="詳細な説明を入力してください", required=False, style=discord.TextStyle.paragraph, max_length=1000)
     emoji_input = discord.ui.TextInput(label="Emoji", placeholder="絵文字を入力してください（任意）", required=False)
 
-    priority_select = discord.ui.Select(
-        placeholder="優先度を選んでください",
-        options=[
-            discord.SelectOption(label="通常", value="normal", description="通常のカテゴリに作成"),
-            discord.SelectOption(label="優先", value="priority", description="優先カテゴリに作成"),
-        ],
-        custom_id="priority_select"
-    )
-
-    def add_select(self):
-        self.add_item(self.priority_select)
-
     async def on_submit(self, interaction: discord.Interaction):
         guild = interaction.guild
         user = interaction.user
 
-        is_priority = self.priority_select.values[0] == "priority"
-        category_name = self.priority_category if is_priority else self.normal_category
+        category_name = self.priority_category if self.is_priority else self.normal_category
 
         category = discord.utils.get(guild.categories, name=category_name)
         if not category:
@@ -66,27 +53,29 @@ class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
         embed = discord.Embed(
             title=f"{emoji} {self.title_input.value}",
             description=self.desc_input.value or "(説明なし)",
-            color=discord.Color.gold() if is_priority else discord.Color.blue()
+            color=discord.Color.gold() if self.is_priority else discord.Color.blue()
         )
         embed.set_footer(text=f"作成者: {user.name}", icon_url=user.display_avatar.url)
         await channel.send(content=f"{user.mention} さんがチケットを作成しました。", embed=embed)
 
         await interaction.response.send_message(f"{channel.mention} にチケットを作成しました！", ephemeral=True)
 
-# --- View（ボタンUI） ---
 class TicketButtonView(discord.ui.View):
     def __init__(self, normal_category: str, priority_category: str):
         super().__init__(timeout=None)
         self.normal_category = normal_category
         self.priority_category = priority_category
 
-    @discord.ui.button(label="🎫 チケットを作成", style=discord.ButtonStyle.primary, custom_id="open_ticket_modal")
-    async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        modal = TicketModal(self.normal_category, self.priority_category)
-        modal.add_select()
+    @discord.ui.button(label="🎫 通常チケットを作成", style=discord.ButtonStyle.primary, custom_id="open_normal_ticket_modal")
+    async def normal_ticket_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = TicketModal(self.normal_category, self.priority_category, is_priority=False)
         await interaction.response.send_modal(modal)
 
-# --- スラッシュコマンド ---
+    @discord.ui.button(label="⚠️ 優先チケットを作成", style=discord.ButtonStyle.danger, custom_id="open_priority_ticket_modal")
+    async def priority_ticket_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        modal = TicketModal(self.normal_category, self.priority_category, is_priority=True)
+        await interaction.response.send_modal(modal)
+
 @bot.tree.command(name="ticket", description="チケットボタンを表示します")
 @app_commands.describe(
     normal="通常チケット用カテゴリ名",
@@ -102,13 +91,11 @@ async def ticket(
     view = TicketButtonView(normal_category=normal, priority_category=priority)
     await interaction.response.send_message(description, view=view, ephemeral=False)
 
-# --- 起動時 ---
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"{bot.user} が起動しました。")
 
-# --- Flask ---
 app = Flask(__name__)
 
 @app.route('/')
