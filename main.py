@@ -13,11 +13,13 @@ intents.message_content = True
 intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-TICKET_CATEGORY_NAME = "チケット"
-TICKET_PRIORITY_CATEGORY_NAME = "優先"
-SUPPORT_ROLE_NAME = "サポート"
-
+# --- Modalフォーム ---
 class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
+    def __init__(self, normal_category: str, priority_category: str):
+        super().__init__()
+        self.normal_category = normal_category
+        self.priority_category = priority_category
+
     title_input = discord.ui.TextInput(label="Label", placeholder="チケットのタイトルを入力してください", required=True)
     desc_input = discord.ui.TextInput(label="Description", placeholder="詳細な説明を入力してください", required=False, style=discord.TextStyle.paragraph, max_length=1000)
     emoji_input = discord.ui.TextInput(label="Emoji", placeholder="絵文字を入力してください（任意）", required=False)
@@ -31,8 +33,7 @@ class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
         custom_id="priority_select"
     )
 
-    def __init__(self):
-        super().__init__()
+    def add_select(self):
         self.add_item(self.priority_select)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -40,13 +41,13 @@ class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
         user = interaction.user
 
         is_priority = self.priority_select.values[0] == "priority"
-        category_name = TICKET_PRIORITY_CATEGORY_NAME if is_priority else TICKET_CATEGORY_NAME
+        category_name = self.priority_category if is_priority else self.normal_category
 
         category = discord.utils.get(guild.categories, name=category_name)
         if not category:
             category = await guild.create_category(category_name)
 
-        support_role = discord.utils.get(guild.roles, name=SUPPORT_ROLE_NAME)
+        support_role = discord.utils.get(guild.roles, name="サポート")
 
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
@@ -71,26 +72,42 @@ class TicketModal(discord.ui.Modal, title="チケット項目を追加"):
 
         await interaction.response.send_message(f"{channel.mention} にチケットを作成しました！", ephemeral=True)
 
+# --- View（ボタンUI） ---
 class TicketButtonView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, normal_category: str, priority_category: str):
         super().__init__(timeout=None)
+        self.normal_category = normal_category
+        self.priority_category = priority_category
 
     @discord.ui.button(label="🎫 チケットを作成", style=discord.ButtonStyle.primary, custom_id="open_ticket_modal")
     async def button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(TicketModal())
+        modal = TicketModal(self.normal_category, self.priority_category)
+        modal.add_select()
+        await interaction.response.send_modal(modal)
 
-@bot.tree.command(name="ticket", description="チケット作成ボタンを表示します")
-async def ticket(interaction: discord.Interaction):
-    view = TicketButtonView()
-    await interaction.response.send_message(
-        "以下のボタンからチケットを作成できます：", view=view, ephemeral=False
-    )
+# --- スラッシュコマンド ---
+@bot.tree.command(name="ticket", description="チケットボタンを表示します")
+@app_commands.describe(
+    normal="通常チケット用カテゴリ名",
+    priority="優先チケット用カテゴリ名",
+    description="チケット作成ボタン上の案内文（任意）"
+)
+async def ticket(
+    interaction: discord.Interaction,
+    normal: str,
+    priority: str,
+    description: str = "以下のボタンからチケットを作成してください："
+):
+    view = TicketButtonView(normal_category=normal, priority_category=priority)
+    await interaction.response.send_message(description, view=view, ephemeral=False)
 
+# --- 起動時 ---
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"{bot.user} が起動しました。")
 
+# --- Flask ---
 app = Flask(__name__)
 
 @app.route('/')
